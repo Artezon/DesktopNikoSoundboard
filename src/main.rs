@@ -1,19 +1,22 @@
 #![windows_subsystem = "windows"]
 
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
 use gpui::*;
 use gpui_component::button::Button;
 use gpui_component::*;
-use image::{imageops::FilterType, Frame};
-use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
+use image::{Frame, imageops::FilterType};
 use kira::sound::PlaybackState;
+use kira::sound::static_sound::{StaticSoundData, StaticSoundSettings};
 use kira::{AudioManager, AudioManagerSettings, DefaultBackend, PlaybackRate};
 use rand::RngExt;
+
+const BG_DARK: u32 = 0x00000040;
+const BG_LIGHT: u32 = 0xffffff40;
 
 const NIKO_PNG: &[u8] = include_bytes!("../assets/niko.png");
 const NIKO_PANCAKES_PNG: &[u8] = include_bytes!("../assets/niko_pancakes.png");
@@ -39,6 +42,7 @@ struct NikoApp {
     cached_size: Option<(u32, u32)>,
     cached_niko: Option<Arc<RenderImage>>,
     cached_pancakes: Option<Arc<RenderImage>>,
+    _subscription: Option<gpui::Subscription>,
 }
 
 impl NikoApp {
@@ -55,6 +59,7 @@ impl NikoApp {
             cached_size: None,
             cached_niko: None,
             cached_pancakes: None,
+            _subscription: None,
         })
     }
 
@@ -120,7 +125,6 @@ impl Render for NikoApp {
 
         v_flex()
             .size_full()
-            .bg(rgba(0x18182519))
             .child(TitleBar::new().bg(rgba(0x00000000)).border_b_0())
             .child(
                 v_flex()
@@ -130,14 +134,20 @@ impl Render for NikoApp {
                     .gap_4()
                     .w_full()
                     .child(img(image).size_full())
-                    .child(
-                        h_flex().justify_center().child(
-                            Button::new("yippee")
-                                .label(":3")
-                                .border_0()
-                                .on_click(cx.listener(Self::on_yippee_click)),
-                        ),
-                    ),
+                    .child(h_flex().justify_center().child({
+                        let bg = if cx.theme().is_dark() {
+                            Hsla::from(rgba(0xcccccc40))
+                        } else {
+                            Hsla::from(rgba(0x33333340))
+                        };
+                        Button::new("yippee")
+                            .label(":3")
+                            .px_3()
+                            .py_5()
+                            .border_0()
+                            .bg(bg)
+                            .on_click(cx.listener(Self::on_yippee_click))
+                    })),
             )
     }
 }
@@ -146,30 +156,53 @@ fn main() {
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
 
     app.run(move |cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(ThemeMode::Dark, None, cx);
-        Theme::global_mut(cx).tokens.background = ThemeToken::from(transparent_black());
+        init(cx);
+        Theme::sync_system_appearance(None, cx);
+        {
+            let bg = if Theme::global(cx).is_dark() {
+                BG_DARK
+            } else {
+                BG_LIGHT
+            };
+            Theme::global_mut(cx).tokens.background = ThemeToken::from(Hsla::from(rgba(bg)));
+        }
 
         let fonts = vec![
             Cow::Borrowed(&include_bytes!("../assets/fonts/Inter-Regular.ttf")[..]),
             Cow::Borrowed(&include_bytes!("../assets/fonts/Inter-Italic.ttf")[..]),
         ];
         cx.text_system().add_fonts(fonts).unwrap();
-        gpui_component::Theme::global_mut(cx).font_family = "Inter".into();
+        Theme::global_mut(cx).font_family = "Inter".into();
 
         cx.spawn(async move |cx| {
             let niko_app = NikoApp::new().unwrap();
             let view = cx.new(|_| niko_app);
 
+            let mut title_opts = TitleBar::title_bar_options();
+            title_opts.title = Some("Niko :3".into());
+
             let options = cx.update(|app| WindowOptions {
                 window_background: WindowBackgroundAppearance::Blurred,
-                titlebar: Some(TitleBar::title_bar_options()),
-                window_bounds: Some(WindowBounds::centered(size(px(320.), px(400.)), app)),
-                window_min_size: Some(size(px(320.), px(400.))),
+                titlebar: Some(title_opts),
+                window_bounds: Some(WindowBounds::centered(size(px(272.), px(360.)), app)),
+                window_min_size: Some(size(px(272.), px(360.))),
                 ..Default::default()
             });
 
             cx.open_window(options, |window, cx| {
+                view.update(cx, |this, cx| {
+                    this._subscription =
+                        Some(cx.observe_window_appearance(window, |_, window, cx| {
+                            Theme::sync_system_appearance(Some(window), &mut *cx);
+                            let bg = if Theme::global(cx).is_dark() {
+                                BG_DARK
+                            } else {
+                                BG_LIGHT
+                            };
+                            Theme::global_mut(cx).tokens.background =
+                                ThemeToken::from(Hsla::from(rgba(bg)));
+                        }));
+                });
                 cx.new(|cx| Root::new(view.clone(), window, cx))
             })
             .unwrap();

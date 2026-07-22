@@ -3964,6 +3964,9 @@ dependencies = [
  "image",
  "kira",
  "rand 0.10.2",
+ "rust-embed",
+ "serde",
+ "serde_json",
  "winresource",
 ]
 

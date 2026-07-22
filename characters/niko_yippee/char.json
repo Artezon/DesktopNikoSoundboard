@@ -1,0 +1,19 @@
+{
+  "name": "Happy Niko",
+  "action_text": ":3",
+  "images": {
+    "idle": {
+      "file": "niko.png",
+      "pixel_art": true
+    },
+    "speaking": {
+      "file": "niko_pancakes.png",
+      "pixel_art": true
+    }
+  },
+  "sounds": [
+    "yippee.ogg"
+  ],
+  "sound_random_weights": [1],
+  "pitch": [0.9, 1.1]
+}

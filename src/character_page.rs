@@ -1,4 +1,5 @@
 use crate::character::CharacterConfig;
+use crate::pixel_img::pixel_img;
 use gpui::{
     Context, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
     RenderImage, Styled, Window, WindowControlArea, div, img, prelude::FluentBuilder,
@@ -9,7 +10,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
-use image::{Frame, imageops::FilterType};
+use image::{Frame, load_from_memory};
 use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings};
 use kira::{AudioManager, AudioManagerSettings, PlaybackRate};
@@ -21,8 +22,8 @@ pub struct CharacterPage {
     load_success: bool,
     name: String,
     action_text: Option<String>,
-    idle_img_bytes: Vec<u8>,
-    speaking_img_bytes: Vec<u8>,
+    idle_image: Option<Arc<RenderImage>>,
+    speaking_image: Option<Arc<RenderImage>>,
     idle_pixel_art: bool,
     speaking_pixel_art: bool,
     sounds: Vec<StaticSoundData>,
@@ -30,21 +31,12 @@ pub struct CharacterPage {
     pitch_min: f64,
     pitch_max: f64,
     active_sounds: Vec<StaticSoundHandle>,
-    cached_size: Option<(u32, u32)>,
-    cached_idle: Option<Arc<RenderImage>>,
-    cached_speaking: Option<Arc<RenderImage>>,
     audio_manager: Option<AudioManager>,
     focus_handle: Option<FocusHandle>,
 }
 
-fn render_image(bytes: &[u8], pixel_art: bool, max_w: u32, max_h: u32) -> Arc<RenderImage> {
-    let img = image::load_from_memory(bytes).unwrap();
-    let filter = if pixel_art {
-        FilterType::Nearest
-    } else {
-        FilterType::Lanczos3
-    };
-    let img = img.resize(max_w, max_h, filter);
+fn render_image_from_bytes(bytes: &[u8]) -> Arc<RenderImage> {
+    let img = load_from_memory(bytes).unwrap();
     let mut data = img.into_rgba8();
     for pixel in data.chunks_exact_mut(4) {
         pixel.swap(0, 2);
@@ -87,15 +79,12 @@ impl CharacterPage {
             };
             let (pitch_min, pitch_max) = (pitch_min.min(pitch_max), pitch_max.max(pitch_min));
 
-            image::load_from_memory(&idle_bytes)?;
-            image::load_from_memory(&speaking_bytes)?;
-
             Ok(CharacterPage {
                 load_success: true,
                 name: config.name.clone(),
                 action_text: config.action_text.clone(),
-                idle_img_bytes: idle_bytes,
-                speaking_img_bytes: speaking_bytes,
+                idle_image: Some(render_image_from_bytes(&idle_bytes)),
+                speaking_image: Some(render_image_from_bytes(&speaking_bytes)),
                 idle_pixel_art,
                 speaking_pixel_art,
                 sounds,
@@ -103,9 +92,6 @@ impl CharacterPage {
                 pitch_min,
                 pitch_max,
                 active_sounds: Vec::new(),
-                cached_size: None,
-                cached_idle: None,
-                cached_speaking: None,
                 audio_manager: Some(manager),
                 focus_handle: Some(focus_handle.clone()),
             })
@@ -194,7 +180,7 @@ impl CharacterPage {
 }
 
 impl Render for CharacterPage {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.active_sounds
             .retain(|h| h.state() == PlaybackState::Playing);
         let is_playing = !self.active_sounds.is_empty();
@@ -239,30 +225,16 @@ impl Render for CharacterPage {
             .size_full()
             .child(top_bar)
             .when(self.load_success, |this| {
-                let window_size = window.viewport_size();
-                let w = window_size.width.as_f32() as u32;
-                let h = window_size.height.as_f32() as u32;
-
-                if self.cached_size != Some((w, h)) {
-                    self.cached_idle = Some(render_image(
-                        &self.idle_img_bytes,
-                        self.idle_pixel_art,
-                        w,
-                        h,
-                    ));
-                    self.cached_speaking = Some(render_image(
-                        &self.speaking_img_bytes,
-                        self.speaking_pixel_art,
-                        w,
-                        h,
-                    ));
-                    self.cached_size = Some((w, h));
-                }
-
                 let image = if is_playing {
-                    self.cached_speaking.clone().unwrap()
+                    self.speaking_image.clone().unwrap()
                 } else {
-                    self.cached_idle.clone().unwrap()
+                    self.idle_image.clone().unwrap()
+                };
+
+                let is_pixel_art = if is_playing {
+                    self.speaking_pixel_art
+                } else {
+                    self.idle_pixel_art
                 };
 
                 this.child(
@@ -272,7 +244,11 @@ impl Render for CharacterPage {
                         .p_4()
                         .gap_4()
                         .w_full()
-                        .child(img(image).size_full())
+                        .child(if is_pixel_art {
+                            pixel_img(image).size_full().into_any_element()
+                        } else {
+                            img(image).size_full().into_any_element()
+                        })
                         .child(h_flex().justify_center().child({
                             let action_text = self
                                 .action_text

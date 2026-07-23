@@ -3,6 +3,7 @@
 mod asset_source;
 mod character;
 mod character_page;
+mod pixel_img;
 mod select_page;
 mod theme;
 

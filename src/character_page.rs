@@ -1,4 +1,4 @@
-use crate::character::CharacterConfig;
+use crate::character::{CharacterConfig, read_char_asset};
 use crate::pixel_img::pixel_img;
 use gpui::{
     Context, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
@@ -52,18 +52,19 @@ impl CharacterPage {
         let result = (|| -> Result<CharacterPage, anyhow::Error> {
             let manager = AudioManager::new(AudioManagerSettings::default())?;
 
-            let idle_path = config.dir.join(&config.images.idle.file);
-            let idle_bytes = std::fs::read(&idle_path)?;
+            let mut source = crate::character::get_char_asset_source(config)
+                .ok_or_else(|| anyhow::anyhow!("cannot open character"))?;
+
+            let idle_bytes = read_char_asset(&mut source, &config.images.idle.file)?;
             let idle_pixel_art = config.images.idle.pixel_art;
 
-            let speaking_path = config.dir.join(&config.images.speaking.file);
-            let speaking_bytes = std::fs::read(&speaking_path)?;
+            let speaking_bytes = read_char_asset(&mut source, &config.images.speaking.file)?;
             let speaking_pixel_art = config.images.speaking.pixel_art;
 
             let mut sounds = Vec::new();
             for sound_file in &config.sounds {
-                let sound_path = config.dir.join(sound_file);
-                let data = StaticSoundData::from_file(sound_path)?;
+                let bytes = read_char_asset(&mut source, sound_file)?;
+                let data = StaticSoundData::from_cursor(std::io::Cursor::new(bytes))?;
                 sounds.push(data);
             }
 

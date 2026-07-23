@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize)]
 pub struct CharacterConfig {
     pub name: String,
     pub action_text: Option<String>,
@@ -13,13 +13,13 @@ pub struct CharacterConfig {
     pub dir: PathBuf,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize)]
 pub struct CharacterImages {
     pub idle: CharacterImage,
     pub speaking: CharacterImage,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize)]
 pub struct CharacterImage {
     pub file: String,
     pub pixel_art: bool,

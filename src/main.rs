@@ -7,13 +7,14 @@ mod select_page;
 mod theme;
 
 use gpui::{
-    AppContext, Context, Entity, IntoElement, Render, Subscription, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, px, size,
+    AppContext, BorrowAppContext, Context, CursorHideMode, Entity, Global, IntoElement, Render,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, px, size,
 };
 use gpui_component::{Root, Theme, TitleBar, init};
 
-use character_page::{CharacterPage, CharacterPageEvent};
-use select_page::{SelectPage, SelectPageEvent};
+use character::CharacterConfig;
+use character_page::CharacterPage;
+use select_page::SelectPage;
 
 enum Page {
     Select(Entity<SelectPage>),
@@ -23,55 +24,14 @@ enum Page {
 struct App {
     page: Page,
     _window_appearance_subscription: Option<gpui::Subscription>,
-    _character_chosen_subscription: Option<Subscription>,
-    _go_back_subscription: Option<Subscription>,
 }
 
 impl App {
-    fn new(cx: &mut Context<Self>) -> Self {
-        let select_page = cx.new(|_| SelectPage::new());
-        let _character_chosen_subscription =
-            Some(cx.subscribe(&select_page, Self::on_character_chosen));
-
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
-            page: Page::Select(select_page),
+            page: Page::Select(cx.new(|cx| SelectPage::new(window, cx))),
             _window_appearance_subscription: None,
-            _character_chosen_subscription,
-            _go_back_subscription: None,
         }
-    }
-
-    fn on_character_chosen(
-        &mut self,
-        select_page: Entity<SelectPage>,
-        event: &SelectPageEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let SelectPageEvent::CharacterChosen(index) = event;
-        let Some(config) = select_page.read(cx).characters.get(*index).cloned() else {
-            return;
-        };
-
-        let character_page = cx.new(|_| CharacterPage::load(&config));
-        self._go_back_subscription = Some(cx.subscribe(&character_page, Self::on_go_back));
-        self.page = Page::Character(character_page);
-        cx.notify();
-    }
-
-    fn on_go_back(
-        &mut self,
-        _character_page: Entity<CharacterPage>,
-        event: &CharacterPageEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let CharacterPageEvent::GoBack = event;
-
-        let select_page = cx.new(|_| SelectPage::new());
-        self._character_chosen_subscription =
-            Some(cx.subscribe(&select_page, Self::on_character_chosen));
-        self._go_back_subscription = None;
-        self.page = Page::Select(select_page);
-        cx.notify();
     }
 }
 
@@ -82,6 +42,30 @@ impl Render for App {
             Page::Character(page) => page.clone().into_any_element(),
         }
     }
+}
+
+struct AppGlobal {
+    app: Entity<App>,
+}
+
+impl Global for AppGlobal {}
+
+pub fn go_to_character(config: &CharacterConfig, window: &mut Window, cx: &mut gpui::App) {
+    cx.update_global::<AppGlobal, ()>(|global, cx| {
+        global.app.update(cx, |this, cx| {
+            this.page = Page::Character(cx.new(|cx| CharacterPage::new(config, window, cx)));
+            cx.notify();
+        });
+    });
+}
+
+pub fn go_to_select(window: &mut Window, cx: &mut gpui::App) {
+    cx.update_global::<AppGlobal, ()>(|global, cx| {
+        global.app.update(cx, |this, cx| {
+            this.page = Page::Select(cx.new(|cx| SelectPage::new(window, cx)));
+            cx.notify();
+        });
+    });
 }
 
 fn main() {
@@ -106,8 +90,6 @@ fn main() {
         Theme::sync_system_appearance(None, cx);
         theme::setup_theme(cx);
 
-        let view = cx.new(|cx| App::new(cx));
-
         let mut title_opts = TitleBar::title_bar_options();
         title_opts.title = Some("Niko :3".into());
 
@@ -119,15 +101,20 @@ fn main() {
             ..Default::default()
         };
 
+        cx.set_cursor_hide_mode(CursorHideMode::Never);
+
         cx.open_window(options, |window, cx| {
-            view.update(cx, |this, cx| {
+            let app = cx.new(|cx| App::new(window, cx));
+            cx.set_global(AppGlobal { app: app.clone() });
+
+            app.update(cx, |this, cx| {
                 this._window_appearance_subscription =
                     Some(cx.observe_window_appearance(window, |_, window, cx| {
                         Theme::sync_system_appearance(Some(window), &mut *cx);
                         theme::setup_theme(cx);
                     }));
             });
-            cx.new(|cx| Root::new(view.clone(), window, cx))
+            cx.new(|cx| Root::new(app.clone(), window, cx))
         })
         .unwrap();
     });

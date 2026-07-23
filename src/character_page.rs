@@ -1,7 +1,8 @@
 use crate::character::CharacterConfig;
 use gpui::{
-    Context, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render, RenderImage,
-    Styled, Window, WindowControlArea, div, img, prelude::FluentBuilder, transparent_black,
+    Context, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
+    RenderImage, Styled, Window, WindowControlArea, div, img, prelude::FluentBuilder,
+    transparent_black,
 };
 use gpui_component::{
     Icon, IconName, TitleBar,
@@ -15,12 +16,9 @@ use kira::{AudioManager, AudioManagerSettings, PlaybackRate};
 use rand::RngExt;
 use std::sync::Arc;
 
-pub enum CharacterPageEvent {
-    GoBack,
-}
-
 #[derive(Default)]
 pub struct CharacterPage {
+    load_success: bool,
     name: String,
     action_text: Option<String>,
     idle_img_bytes: Vec<u8>,
@@ -36,6 +34,7 @@ pub struct CharacterPage {
     cached_idle: Option<Arc<RenderImage>>,
     cached_speaking: Option<Arc<RenderImage>>,
     audio_manager: Option<AudioManager>,
+    focus_handle: Option<FocusHandle>,
 }
 
 fn render_image(bytes: &[u8], pixel_art: bool, max_w: u32, max_h: u32) -> Arc<RenderImage> {
@@ -53,10 +52,11 @@ fn render_image(bytes: &[u8], pixel_art: bool, max_w: u32, max_h: u32) -> Arc<Re
     Arc::new(RenderImage::new([Frame::new(data)]))
 }
 
-impl EventEmitter<CharacterPageEvent> for CharacterPage {}
-
 impl CharacterPage {
-    pub fn load(config: &CharacterConfig) -> Self {
+    pub fn new(config: &CharacterConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_handle = cx.focus_handle();
+        window.focus(&focus_handle, cx);
+
         let result = (|| -> Result<CharacterPage, anyhow::Error> {
             let manager = AudioManager::new(AudioManagerSettings::default())?;
 
@@ -91,6 +91,7 @@ impl CharacterPage {
             image::load_from_memory(&speaking_bytes)?;
 
             Ok(CharacterPage {
+                load_success: true,
                 name: config.name.clone(),
                 action_text: config.action_text.clone(),
                 idle_img_bytes: idle_bytes,
@@ -106,6 +107,7 @@ impl CharacterPage {
                 cached_idle: None,
                 cached_speaking: None,
                 audio_manager: Some(manager),
+                focus_handle: Some(focus_handle.clone()),
             })
         })();
 
@@ -113,6 +115,7 @@ impl CharacterPage {
             Ok(state) => state,
             Err(_) => CharacterPage {
                 name: config.name.clone(),
+                focus_handle: Some(focus_handle),
                 ..Default::default()
             },
         }
@@ -151,7 +154,7 @@ impl CharacterPage {
         (index, pitch)
     }
 
-    pub fn play_sound(&mut self, cx: &mut Context<Self>) {
+    fn play_sound(&mut self, cx: &mut Context<Self>) {
         if self.sounds.is_empty() {
             return;
         }
@@ -181,14 +184,19 @@ impl CharacterPage {
             .detach();
         }
     }
+
+    fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for handle in &mut self.active_sounds {
+            handle.stop(Default::default());
+        }
+        crate::go_to_select(window, cx);
+    }
 }
 
 impl Render for CharacterPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.active_sounds
             .retain(|h| h.state() == PlaybackState::Playing);
-
-        let is_failed = self.idle_img_bytes.is_empty();
         let is_playing = !self.active_sounds.is_empty();
 
         let top_bar = h_flex()
@@ -199,11 +207,8 @@ impl Render for CharacterPage {
                     .icon(IconName::ArrowLeft)
                     .rounded_none()
                     .ghost()
-                    .on_click(cx.listener(|this, _, _window, cx| {
-                        for handle in &mut this.active_sounds {
-                            handle.stop(Default::default());
-                        }
-                        cx.emit(CharacterPageEvent::GoBack);
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.go_back(window, cx);
                     })),
             )
             .child(
@@ -218,77 +223,93 @@ impl Render for CharacterPage {
             )
             .child(TitleBar::new().bg(transparent_black()).border_b_0().p_0());
 
-        if is_failed {
-            return v_flex().size_full().child(top_bar).child(
-                v_flex()
-                    .flex_1()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .child("Character load failed"),
-            );
-        }
+        v_flex()
+            .id("character-page")
+            .track_focus(&self.focus_handle.as_ref().unwrap())
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.is_held {
+                    return;
+                }
+                match event.keystroke.key.as_str() {
+                    "space" => this.play_sound(cx),
+                    "escape" => this.go_back(window, cx),
+                    _ => {}
+                }
+            }))
+            .size_full()
+            .child(top_bar)
+            .when(self.load_success, |this| {
+                let window_size = window.viewport_size();
+                let w = window_size.width.as_f32() as u32;
+                let h = window_size.height.as_f32() as u32;
 
-        let window_size = window.viewport_size();
-        let w = window_size.width.as_f32() as u32;
-        let h = window_size.height.as_f32() as u32;
+                if self.cached_size != Some((w, h)) {
+                    self.cached_idle = Some(render_image(
+                        &self.idle_img_bytes,
+                        self.idle_pixel_art,
+                        w,
+                        h,
+                    ));
+                    self.cached_speaking = Some(render_image(
+                        &self.speaking_img_bytes,
+                        self.speaking_pixel_art,
+                        w,
+                        h,
+                    ));
+                    self.cached_size = Some((w, h));
+                }
 
-        if self.cached_size != Some((w, h)) {
-            self.cached_idle = Some(render_image(
-                &self.idle_img_bytes,
-                self.idle_pixel_art,
-                w,
-                h,
-            ));
-            self.cached_speaking = Some(render_image(
-                &self.speaking_img_bytes,
-                self.speaking_pixel_art,
-                w,
-                h,
-            ));
-            self.cached_size = Some((w, h));
-        }
+                let image = if is_playing {
+                    self.cached_speaking.clone().unwrap()
+                } else {
+                    self.cached_idle.clone().unwrap()
+                };
 
-        let image = if is_playing {
-            self.cached_speaking.clone().unwrap()
-        } else {
-            self.cached_idle.clone().unwrap()
-        };
+                this.child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .p_4()
+                        .gap_4()
+                        .w_full()
+                        .child(img(image).size_full())
+                        .child(h_flex().justify_center().child({
+                            let action_text = self
+                                .action_text
+                                .as_ref()
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty());
 
-        v_flex().size_full().child(top_bar).child(
-            v_flex()
-                .flex_1()
-                .min_h_0()
-                .p_4()
-                .gap_4()
-                .w_full()
-                .child(img(image).size_full())
-                .child(h_flex().justify_center().child({
-                    let action_text = self
-                        .action_text
-                        .as_ref()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty());
-
-                    Button::new("sound")
-                        .p_3()
-                        .h_10()
-                        .min_w_10()
-                        .max_w_full()
-                        .child(
-                            div()
-                                .text_ellipsis()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .when_none(&action_text, |this| {
-                                    this.child(Icon::default().path("icons/sound.svg"))
-                                })
-                                .when_some(action_text, |this, text| this.child(text)),
-                        )
-                        .on_click(cx.listener(|this, _, _window, cx| {
-                            this.play_sound(cx);
-                        }))
-                })),
-        )
+                            Button::new("sound")
+                                .p_3()
+                                .h_10()
+                                .min_w_10()
+                                .max_w_full()
+                                .child(
+                                    div()
+                                        .text_ellipsis()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .when_none(&action_text, |this| {
+                                            this.child(Icon::default().path("icons/sound.svg"))
+                                        })
+                                        .when_some(action_text, |this, text| this.child(text)),
+                                )
+                                .on_click(cx.listener(|this, _, _window, cx| {
+                                    this.play_sound(cx);
+                                }))
+                        })),
+                )
+            })
+            .when(!self.load_success, |this| {
+                this.child(
+                    v_flex()
+                        .flex_1()
+                        .size_full()
+                        .items_center()
+                        .justify_center()
+                        .child("Character load failed"),
+                )
+            })
     }
 }

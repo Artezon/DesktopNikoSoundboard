@@ -1,11 +1,11 @@
 [package]
-name = "niko-oneshot"
+name = "niko-soundboard"
 version = "1.0.0"
 edition = "2024"
 
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "wayland", "x11"] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 rust-embed = { version = "8.7", features = ["interpolate-folder-path", "include-exclude"] }

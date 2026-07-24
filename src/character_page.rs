@@ -1,13 +1,13 @@
 use crate::character::{CharDataSource, CharacterConfig};
 use crate::pixel_img::pixel_img;
+use crate::title_bar::TitleBar;
 use anyhow::{Context as _, Error};
 use gpui::{
     Context, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render,
-    RenderImage, Styled, Window, WindowControlArea, div, img, prelude::FluentBuilder,
-    transparent_black,
+    RenderImage, Styled, Window, div, img, prelude::FluentBuilder,
 };
 use gpui_component::{
-    Icon, IconName, TitleBar,
+    Icon, IconName,
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
@@ -186,29 +186,15 @@ impl Render for CharacterPage {
             .retain(|h| h.state() == PlaybackState::Playing);
         let is_playing = !self.active_sounds.is_empty();
 
-        let top_bar = h_flex()
-            .w_full()
-            .items_center()
-            .child(
-                Button::new("back")
-                    .icon(IconName::ArrowLeft)
-                    .rounded_none()
-                    .ghost()
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.go_back(window, cx);
-                    })),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .mx_1()
-                    .window_control_area(WindowControlArea::Drag)
-                    .text_ellipsis()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .child(self.name.clone()),
-            )
-            .child(TitleBar::new().bg(transparent_black()).border_b_0().p_0());
+        let top_bar = TitleBar::new().label(self.name.clone()).child(
+            Button::new("back")
+                .icon(IconName::ArrowLeft)
+                .rounded_none()
+                .ghost()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.go_back(window, cx);
+                })),
+        );
 
         v_flex()
             .id("character-page")

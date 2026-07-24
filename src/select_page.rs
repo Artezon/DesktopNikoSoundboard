@@ -1,11 +1,10 @@
 use crate::character::{CharacterConfig, app_dir, load_char_list};
+use crate::title_bar::TitleBar;
 use gpui::{
     ClickEvent, Context, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, ParentElement,
-    Render, Styled, Task, Window, WindowControlArea, div, transparent_black,
+    Render, Styled, Task, Window, div,
 };
-use gpui_component::{
-    TitleBar, button::Button, h_flex, scroll::ScrollableElement, text::markdown, v_flex,
-};
+use gpui_component::{button::Button, scroll::ScrollableElement, text::markdown, v_flex};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 pub struct SelectPage {
@@ -93,21 +92,7 @@ impl SelectPage {
 
 impl Render for SelectPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let top_bar = h_flex()
-            .w_full()
-            .items_center()
-            .pl_1p5()
-            .child(
-                div()
-                    .flex_1()
-                    .mx_1()
-                    .window_control_area(WindowControlArea::Drag)
-                    .text_ellipsis()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .child("Select character"),
-            )
-            .child(TitleBar::new().bg(transparent_black()).border_b_0().p_0());
+        let top_bar = TitleBar::new().label("Select character");
 
         let buttons: Vec<_> = self
             .characters

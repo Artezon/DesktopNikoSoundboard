@@ -6,10 +6,11 @@ mod character_page;
 mod pixel_img;
 mod select_page;
 mod theme;
+mod title_bar;
 
 use gpui::{
     AppContext, BorrowAppContext, Context, CursorHideMode, Entity, Global, IntoElement, Render,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, px, size,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowOptions, px, size,
 };
 use gpui_component::{Root, Theme, TitleBar, init};
 
@@ -95,8 +96,9 @@ fn main() {
         title_opts.title = Some("Niko :3".into());
 
         let options = WindowOptions {
-            window_background: WindowBackgroundAppearance::Blurred,
             titlebar: Some(title_opts),
+            window_decorations: Some(WindowDecorations::Client),
+            window_background: WindowBackgroundAppearance::Blurred,
             window_bounds: Some(WindowBounds::centered(size(px(272.), px(360.)), cx)),
             window_min_size: Some(size(px(272.), px(360.))),
             ..Default::default()

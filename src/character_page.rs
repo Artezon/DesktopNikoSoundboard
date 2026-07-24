@@ -16,7 +16,7 @@ use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle, StaticSoundSettings};
 use kira::{AudioManager, AudioManagerSettings, PlaybackRate};
 use rand::RngExt;
-use std::sync::Arc;
+use std::{io::Cursor, sync::Arc, sync::RwLock};
 
 #[derive(Default)]
 pub struct CharacterPage {
@@ -31,7 +31,7 @@ pub struct CharacterPage {
     sound_weights: Vec<f64>,
     pitch_min: f64,
     pitch_max: f64,
-    active_sounds: Vec<StaticSoundHandle>,
+    active_sounds: Vec<Arc<RwLock<StaticSoundHandle>>>,
     audio_manager: Option<AudioManager>,
     focus_handle: Option<FocusHandle>,
 }
@@ -64,7 +64,7 @@ impl CharacterPage {
             let mut sounds = Vec::new();
             for sound_file in &config.sounds {
                 let bytes = source.read_content(sound_file)?;
-                let data = StaticSoundData::from_cursor(std::io::Cursor::new(bytes))?;
+                let data = StaticSoundData::from_cursor(Cursor::new(bytes))?;
                 sounds.push(data);
             }
 
@@ -156,16 +156,21 @@ impl CharacterPage {
         let sound = self.sounds[index].clone().with_settings(settings);
 
         if let Ok(handle) = manager.play(sound) {
-            self.active_sounds.push(handle);
+            let handle = Arc::new(RwLock::new(handle));
+            self.active_sounds.push(handle.clone());
             cx.notify();
 
             let duration = self.sounds.get(index).map_or_else(
                 || std::time::Duration::from_secs(0),
                 |d| d.duration().div_f64(pitch),
             );
+            let time_margin = std::time::Duration::from_millis(50);
 
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(duration).await;
+                while handle.read().unwrap().state() == PlaybackState::Playing {
+                    cx.background_executor().timer(time_margin).await;
+                }
                 this.update(cx, |_, cx| cx.notify()).ok();
             })
             .detach();
@@ -174,7 +179,7 @@ impl CharacterPage {
 
     fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         for handle in &mut self.active_sounds {
-            handle.stop(Default::default());
+            handle.write().unwrap().stop(Default::default());
         }
         crate::go_to_select(window, cx);
     }
@@ -183,7 +188,7 @@ impl CharacterPage {
 impl Render for CharacterPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.active_sounds
-            .retain(|h| h.state() == PlaybackState::Playing);
+            .retain(|h| h.read().unwrap().state() == PlaybackState::Playing);
         let is_playing = !self.active_sounds.is_empty();
 
         let top_bar = TitleBar::new().label(self.name.clone()).child(
